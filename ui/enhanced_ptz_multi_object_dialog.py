@@ -21,7 +21,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtGui import QFont, QColor, QPalette, QPixmap, QPainter, QBrush
-import threading
 import time
 import json
 import os
@@ -225,6 +224,11 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         self.ui_update_timer = QTimer()
         self.ui_update_timer.timeout.connect(self._update_ui_displays)
         self.ui_update_timer.start(1000)  # Cada segundo
+
+        # Timer único para detener movimiento PTZ
+        self._stop_timer = QTimer()
+        self._stop_timer.setSingleShot(True)
+        self._stop_timer.timeout.connect(self._stop_current_movement)
         
         # Configurar interfaz
         self._setup_enhanced_ui()
@@ -255,6 +259,10 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             # Detener timer de UI
             if hasattr(self, 'ui_update_timer') and self.ui_update_timer:
                 self.ui_update_timer.stop()
+
+            # Detener timer de parada PTZ
+            if hasattr(self, '_stop_timer') and self._stop_timer.isActive():
+                self._stop_timer.stop()
             
             # Limpiar tracker
             if hasattr(self, 'current_tracker') and self.current_tracker:
@@ -1268,15 +1276,10 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 if hasattr(self.current_tracker, 'successful_moves'):
                     self.current_tracker.successful_moves += 1
                 
-                # Detener después de un tiempo corto
-                import threading
-                def stop_movement():
-                    import time
-                    time.sleep(0.1)  # Mover por 100ms
-                    if hasattr(self.current_tracker, 'stop'):
-                        self.current_tracker.stop()
-                
-                threading.Thread(target=stop_movement, daemon=True).start()
+                # Programar detención después de un tiempo corto
+                if self._stop_timer.isActive():
+                    self._stop_timer.stop()
+                self._stop_timer.start(100)  # 100 ms
                 return True
             
             return False
@@ -1286,6 +1289,14 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             if hasattr(self.current_tracker, 'failed_moves'):
                 self.current_tracker.failed_moves += 1
             return False
+
+    def _stop_current_movement(self):
+        """Detener movimiento PTZ actual"""
+        if self.current_tracker and hasattr(self.current_tracker, 'stop'):
+            try:
+                self.current_tracker.stop()
+            except Exception as e:
+                self._log(f"⚠️ Error deteniendo movimiento: {e}")
 
     def _update_multi_config(self):
         """Actualizar configuración multi-objeto"""
