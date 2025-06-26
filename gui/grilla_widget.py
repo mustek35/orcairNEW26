@@ -1455,6 +1455,12 @@ class GrillaWidget(QWidget):
         current_cam_ip = self.cam_data.get("ip")
         discarded_list_for_json = sorted([list(cell) for cell in self.discarded_cells])
 
+        # Sincronizar con la estructura en memoria para evitar pérdida al cerrar la app
+        try:
+            self.cam_data["discarded_grid_cells"] = discarded_list_for_json
+        except Exception:
+            pass
+
         config_data = None
         try:
             with open(CONFIG_FILE_PATH, 'r') as f:
@@ -1497,6 +1503,12 @@ class GrillaWidget(QWidget):
         current_cam_ip = self.cam_data.get("ip")
         presets_for_json = {f"{row}_{col}": preset for (row, col), preset in self.cell_presets.items()}
 
+        # Actualizar también el objeto en memoria para mantener consistencia
+        try:
+            self.cam_data["cell_presets"] = presets_for_json
+        except Exception:
+            pass
+
         try:
             with open(CONFIG_FILE_PATH, 'r') as f:
                 config_data = json.load(f)
@@ -1535,6 +1547,13 @@ class GrillaWidget(QWidget):
             f"{row}_{col}": {"ip": data.get("ip"), "preset": str(data.get("preset", ""))}
             for (row, col), data in self.cell_ptz_map.items()
         }
+
+        # Mantener la información en memoria sincronizada con la configuración en disco
+        # Esto asegura que main_window.camera_data_list contenga el mapeo actualizado
+        try:
+            self.cam_data["cell_ptz_map"] = map_for_json
+        except Exception:
+            pass
 
         try:
             with open(CONFIG_FILE_PATH, 'r') as f:
