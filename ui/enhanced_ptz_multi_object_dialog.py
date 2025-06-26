@@ -220,6 +220,11 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         self.session_start_time = 0
         self.performance_history = []
 
+        # Seguimiento de detecciones perdidas
+        self.frames_without_detection = 0
+        self.search_zoom_speed = 0.05
+        self.last_known_ptz = None
+
         # Margen de centrado antes de aplicar zoom
         self.centering_margin = 0.1
         
@@ -1141,7 +1146,7 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 return False
 
             # Validar detecciones
-            if not isinstance(detections, list) or not detections:
+            if not isinstance(detections, list):
                 return False
 
             valid_detections = []
@@ -1149,8 +1154,28 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 if isinstance(det, dict) and 'bbox' in det and len(det.get('bbox', [])) == 4:
                     valid_detections.append(det)
 
+            prev_frames = self.frames_without_detection
             if not valid_detections:
+                self.frames_without_detection += 1
+                if self.frames_without_detection >= 10:
+                    self._zoom_out_search()
                 return False
+            else:
+                if hasattr(self.current_tracker, 'get_position'):
+                    pos = self.current_tracker.get_position()
+                    if pos:
+                        self.last_known_ptz = pos
+                self.frames_without_detection = 0
+                if prev_frames >= 10:
+                    self._stop_current_movement()
+                    if self.last_known_ptz and hasattr(self.current_tracker, 'absolute_move'):
+                        try:
+                            self.current_tracker.absolute_move(
+                                self.last_known_ptz.get('pan', 0.0),
+                                self.last_known_ptz.get('tilt', 0.0),
+                                self.last_known_ptz.get('zoom'))
+                        except Exception as e:
+                            self._log(f"⚠️ Error retornando a última posición PTZ: {e}")
 
             # Incrementar contador de detecciones
             if not hasattr(self, 'detection_count'):
@@ -1323,6 +1348,14 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 self.current_tracker.stop()
             except Exception as e:
                 self._log(f"⚠️ Error deteniendo movimiento: {e}")
+
+    def _zoom_out_search(self):
+        """Realizar zoom out para buscar nuevas detecciones"""
+        if self.current_tracker and hasattr(self.current_tracker, 'continuous_move'):
+            try:
+                self.current_tracker.continuous_move(0.0, 0.0, -self.search_zoom_speed)
+            except Exception as e:
+                self._log(f"⚠️ Error ejecutando búsqueda por zoom: {e}")
 
     def _update_multi_config(self):
         """Actualizar configuración multi-objeto"""
