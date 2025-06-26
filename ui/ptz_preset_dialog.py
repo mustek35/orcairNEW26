@@ -45,6 +45,23 @@ class PTZPresetDialog(QDialog):
 
         # Seleccionar primera cámara PTZ si hay alguna
         self._select_first_ptz_camera()
+
+        # Si no se pasó una instancia y hay datos de cámara, crearla automáticamente
+        if not self.ptz_camera and self.current_camera_data:
+            ip = self.current_camera_data.get("ip")
+            puerto = int(self.current_camera_data.get("puerto", 80))
+            usuario = self.current_camera_data.get("usuario", "")
+            contrasena = self.current_camera_data.get("contrasena", "")
+            try:
+                try:
+                    from core.ptz_control_enhanced import create_enhanced_ptz_camera
+                    self.ptz_camera = create_enhanced_ptz_camera(ip, puerto, usuario, contrasena)
+                except ImportError:
+                    from core.ptz_control import PTZCameraONVIF
+                    self.ptz_camera = PTZCameraONVIF(ip, puerto, usuario, contrasena)
+                self._log(f"✅ Conexión PTZ creada automáticamente para {ip}")
+            except Exception as conn_error:
+                self._log(f"❌ Error creando conexión PTZ: {conn_error}")
         
         # Inicializar sistema PTZ si está disponible
         if ENHANCED_AVAILABLE:
