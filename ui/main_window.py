@@ -1188,13 +1188,33 @@ el rendimiento basado en la actividad de la escena."""
                 return
             
             from ui.ptz_preset_dialog import PTZPresetDialog
-            
+
+            # Tomar una cámara PTZ para inicializar la conexión
+            selected_cam = ptz_cameras[0]
+            ip = selected_cam.get('ip')
+            puerto = int(selected_cam.get('puerto', 80))
+            usuario = selected_cam.get('usuario', '')
+            contrasena = selected_cam.get('contrasena', '')
+
+            ptz_cam = None
+            try:
+                try:
+                    from core.ptz_control_enhanced import create_enhanced_ptz_camera
+                    ptz_cam = create_enhanced_ptz_camera(ip, puerto, usuario, contrasena)
+                except ImportError:
+                    from core.ptz_control import PTZCameraONVIF
+                    ptz_cam = PTZCameraONVIF(ip, puerto, usuario, contrasena)
+            except Exception as conn_error:
+                self.append_debug(f"❌ Error conectando a cámara PTZ {ip}: {conn_error}")
+            if ptz_cam is None:
+                self.append_debug("⚠️ No se pudo inicializar la cámara PTZ seleccionada")
+
             # Asegurar que el sistema PTZ está inicializado
             if not self._ptz_initialized:
                 self._initialize_ptz_system()
-            
-            # CORRECCIÓN: Pasar la lista de cámaras correctamente
-            dialog = PTZPresetDialog(self, camera_list=self.camera_data_list)
+
+            # Pasar la instancia de cámara al diálogo
+            dialog = PTZPresetDialog(self, camera_list=self.camera_data_list, ptz_camera=ptz_cam)
             
             # Conectar señales del diálogo
             dialog.preset_updated.connect(
