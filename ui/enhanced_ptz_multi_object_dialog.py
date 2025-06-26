@@ -1267,10 +1267,27 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             # Limitar velocidades
             pan_speed = max(-0.5, min(0.5, pan_speed))
             tilt_speed = max(-0.5, min(0.5, tilt_speed))
-            
-            # Enviar comando de movimiento continuo
+
+            # ===== Control de ZOOM BÁSICO =====
+            # Calcular área relativa del objeto en el frame
+            obj_ratio = ((x2 - x1) * (y2 - y1)) / float(frame_w * frame_h)
+
+            # Ratio objetivo desde la UI (0-1)
+            target_ratio = self.target_size_slider.value() / 100.0
+
+            # Velocidad base definida por el usuario
+            base_zoom_speed = self.zoom_speed_slider.value() / 10.0
+
+            # Determinar dirección de zoom
+            zoom_speed = 0.0
+            if obj_ratio < target_ratio:
+                zoom_speed = base_zoom_speed
+            elif obj_ratio > target_ratio:
+                zoom_speed = -base_zoom_speed
+
+            # Enviar comando de movimiento continuo con zoom
             if hasattr(self.current_tracker, 'continuous_move'):
-                self.current_tracker.continuous_move(pan_speed, tilt_speed, 0.0)
+                self.current_tracker.continuous_move(pan_speed, tilt_speed, zoom_speed)
                 
                 # Actualizar contadores
                 if hasattr(self.current_tracker, 'successful_moves'):
