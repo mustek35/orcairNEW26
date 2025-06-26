@@ -10,9 +10,6 @@ import json
 import os
 from datetime import datetime  # CORRECCIÓN: Importar solo datetime, no todo el módulo
 
-# Ruta al archivo de configuración global
-CONFIG_FILE_PATH = "config.json"
-
 # Importaciones seguras
 try:
     from core.ptz_control_enhanced import initialize_ptz_system, get_ptz_system_status
@@ -36,32 +33,9 @@ class PTZPresetDialog(QDialog):
         self.ptz_camera = ptz_camera
         self.presets_data = {}
         self.current_camera_data = None
-        self.patrol_timer = QTimer()
-        self.patrol_timer.timeout.connect(self._patrol_step)
-        self.patrol_interval = 30  # segundos por defecto
-        self._patrol_running = False
-        self._patrol_presets = []
-        self._current_patrol_index = 0
-
+        
         # Seleccionar primera cámara PTZ si hay alguna
         self._select_first_ptz_camera()
-
-        # Si no se pasó una instancia y hay datos de cámara, crearla automáticamente
-        if not self.ptz_camera and self.current_camera_data:
-            ip = self.current_camera_data.get("ip")
-            puerto = int(self.current_camera_data.get("puerto", 80))
-            usuario = self.current_camera_data.get("usuario", "")
-            contrasena = self.current_camera_data.get("contrasena", "")
-            try:
-                try:
-                    from core.ptz_control_enhanced import create_enhanced_ptz_camera
-                    self.ptz_camera = create_enhanced_ptz_camera(ip, puerto, usuario, contrasena)
-                except ImportError:
-                    from core.ptz_control import PTZCameraONVIF
-                    self.ptz_camera = PTZCameraONVIF(ip, puerto, usuario, contrasena)
-                self._log(f"✅ Conexión PTZ creada automáticamente para {ip}")
-            except Exception as conn_error:
-                self._log(f"❌ Error creando conexión PTZ: {conn_error}")
         
         # Inicializar sistema PTZ si está disponible
         if ENHANCED_AVAILABLE:
@@ -75,7 +49,6 @@ class PTZPresetDialog(QDialog):
             self.system_info = {}
             self._log("ℹ️ Usando funcionalidad PTZ básica")
         
-        self._load_patrol_config()
         self._setup_ui()
         self._load_presets()
         self._connect_signals()
@@ -349,29 +322,10 @@ class PTZPresetDialog(QDialog):
         
         connection_layout.addRow("Timeout de conexión:", self.connection_timeout_spin)
         connection_layout.addRow("Intentos de reintento:", self.retry_attempts_spin)
-
+        
         connection_group.setLayout(connection_layout)
         layout.addWidget(connection_group)
-
-        # Configuración de patrulla automática
-        patrol_group = QGroupBox("🚶 Patrulla Automática")
-        patrol_layout = QFormLayout()
-
-        self.patrol_interval_spin = QSpinBox()
-        self.patrol_interval_spin.setRange(5, 300)
-        self.patrol_interval_spin.setValue(self.patrol_interval)
-        self.patrol_interval_spin.setSuffix(" seg")
-
-        self.btn_start_patrol = QPushButton("▶️ Iniciar Patrulla")
-        self.btn_stop_patrol = QPushButton("⏹️ Detener Patrulla")
-        self.btn_stop_patrol.setEnabled(False)
-
-        patrol_layout.addRow("Intervalo entre presets:", self.patrol_interval_spin)
-        patrol_layout.addRow(self.btn_start_patrol, self.btn_stop_patrol)
-
-        patrol_group.setLayout(patrol_layout)
-        layout.addWidget(patrol_group)
-
+        
         layout.addStretch()
         
         settings_widget.setLayout(layout)
@@ -411,13 +365,10 @@ class PTZPresetDialog(QDialog):
         
         self.btn_zoom_in.clicked.connect(lambda: self.zoom_camera("in"))
         self.btn_zoom_out.clicked.connect(lambda: self.zoom_camera("out"))
-
+        
         # Configuración
         self.speed_slider.valueChanged.connect(self.update_speed_label)
-        self.patrol_interval_spin.valueChanged.connect(self._on_patrol_interval_changed)
-        self.btn_start_patrol.clicked.connect(self.start_patrol)
-        self.btn_stop_patrol.clicked.connect(self.stop_patrol)
-
+        
         # Botones principales
         self.btn_test_connection.clicked.connect(self.test_connection)
         self.btn_get_position.clicked.connect(self.get_current_position)
@@ -754,72 +705,6 @@ class PTZPresetDialog(QDialog):
     def update_speed_label(self, value):
         """Actualiza la etiqueta de velocidad"""
         self.speed_label.setText(f"Velocidad: {value}/10")
-
-    # ----- Funciones de patrulla automática -----
-    def start_patrol(self):
-        """Inicia la patrulla automática entre presets"""
-        if not self.presets_data:
-            self._log("⚠️ No hay presets para patrullar")
-            return
-        if not self.ptz_camera:
-            self._log("❌ No hay conexión PTZ activa")
-            return
-
-        self._patrol_presets = sorted(int(k) for k in self.presets_data.keys())
-        self._current_patrol_index = 0
-        self._patrol_running = True
-        self._log("🚶 Iniciando patrulla automática")
-        self._patrol_step()
-        self.patrol_timer.start(self.patrol_interval * 1000)
-        self.btn_start_patrol.setEnabled(False)
-        self.btn_stop_patrol.setEnabled(True)
-        self._save_patrol_config()
-
-    def stop_patrol(self):
-        """Detiene la patrulla automática"""
-        self.patrol_timer.stop()
-        self._patrol_running = False
-        self.btn_start_patrol.setEnabled(True)
-        self.btn_stop_patrol.setEnabled(False)
-        self._log("⏹️ Patrulla detenida")
-        self._save_patrol_config()
-
-    def _patrol_step(self):
-        if not self._patrol_running or not self._patrol_presets:
-            return
-        preset = self._patrol_presets[self._current_patrol_index]
-        try:
-            self.ptz_camera.goto_preset(str(preset))
-            self._log(f"📍 Patrulla: preset {preset}")
-        except Exception as e:
-            self._log(f"❌ Error yendo a preset {preset}: {e}")
-        self._current_patrol_index = (self._current_patrol_index + 1) % len(self._patrol_presets)
-
-    def _load_patrol_config(self):
-        """Carga la configuración de patrulla desde config.json"""
-        if os.path.exists(CONFIG_FILE_PATH):
-            try:
-                with open(CONFIG_FILE_PATH, 'r') as f:
-                    data = json.load(f)
-                    patrol_conf = data.get("preset_patrol", {})
-                    self.patrol_interval = int(patrol_conf.get("interval", 30))
-            except Exception as e:
-                self._log(f"⚠️ Error cargando configuración de patrulla: {e}")
-
-    def _save_patrol_config(self):
-        """Guarda la configuración de patrulla en config.json"""
-        try:
-            if os.path.exists(CONFIG_FILE_PATH):
-                with open(CONFIG_FILE_PATH, 'r') as f:
-                    data = json.load(f)
-            else:
-                data = {"camaras": [], "configuracion": {}}
-            data["preset_patrol"] = {"interval": self.patrol_interval}
-            with open(CONFIG_FILE_PATH, 'w') as f:
-                json.dump(data, f, indent=4)
-            self._log("💾 Configuración de patrulla guardada")
-        except Exception as e:
-            self._log(f"❌ Error guardando configuración de patrulla: {e}")
         
     def _save_presets_to_file(self):
         """Guarda los presets al archivo local"""
@@ -829,18 +714,12 @@ class PTZPresetDialog(QDialog):
                 presets_file = f"presets_{ip}.json"
             else:
                 presets_file = "presets_unknown.json"
-
+                
             with open(presets_file, 'w') as f:
                 json.dump(self.presets_data, f, indent=4)
-
+                
         except Exception as e:
             self._log(f"❌ Error guardando presets: {e}")
-
-    def _on_patrol_interval_changed(self, value):
-        self.patrol_interval = int(value)
-        if self._patrol_running:
-            self.patrol_timer.start(self.patrol_interval * 1000)
-        self._save_patrol_config()
             
     def _log(self, message):
         """Agrega un mensaje al área de logs"""
