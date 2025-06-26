@@ -226,6 +226,8 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         self.search_zoom_speed = 0.05
         self.last_known_ptz = None
         self.position_history = deque(maxlen=20)
+        self.initial_zoom_level = None
+        self.detection_preset = None
 
         # Margen de centrado antes de aplicar zoom
         self.centering_margin = 0.1
@@ -813,8 +815,10 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                         self.current_tracker.disconnect()
                 except Exception as e:
                     self._log(f"⚠️ Error deteniendo tracker: {e}")
-                
+
                 self.current_tracker = None
+                self.detection_preset = None
+                self.initial_zoom_level = None
             
             # Actualizar estado
             self.tracking_active = False
@@ -1284,35 +1288,18 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             bbox = best_detection['bbox']
             x1, y1, x2, y2 = bbox
             
-            # Calcular centro del objeto
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
-            
             frame_w, frame_h = frame_size
-            
-            # Implementación básica de seguimiento PTZ
-            # Calcular movimiento necesario
-            center_x = frame_w / 2
-            center_y = frame_h / 2
-            
-            # Error de posición (distancia del centro)
-            error_x = (cx - center_x) / center_x  # Normalizado [-1, 1]
-            error_y = (cy - center_y) / center_y  # Normalizado [-1, 1]
-            
-            # Zona muerta para evitar movimientos innecesarios
-            deadzone = self.centering_margin
-            centered = abs(error_x) < deadzone and abs(error_y) < deadzone
 
-            # Calcular velocidades de movimiento solo si no está centrado
+            # Al detectar por primera vez, guardar preset temporal
+            if self.detection_preset is None and hasattr(self.current_tracker, 'get_position'):
+                pos = self.current_tracker.get_position()
+                if pos:
+                    self.detection_preset = pos
+                    self.initial_zoom_level = pos.get('zoom', 0.0)
+
+            # Solo controlaremos el zoom, sin mover pan/tilt
             pan_speed = 0.0
             tilt_speed = 0.0
-            if not centered:
-                pan_speed = error_x * 0.3  # Velocidad proporcional al error
-                tilt_speed = -error_y * 0.3  # Invertir Y para PTZ
-
-                # Limitar velocidades
-                pan_speed = max(-0.5, min(0.5, pan_speed))
-                tilt_speed = max(-0.5, min(0.5, tilt_speed))
 
             # ===== Control de ZOOM BÁSICO =====
             # Calcular área relativa del objeto en el frame
@@ -1331,22 +1318,35 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             elif obj_ratio > target_ratio:
                 zoom_speed = -base_zoom_speed
 
-            # Evitar aplicar zoom cuando el objeto no está centrado
-            if not centered:
-                zoom_speed = 0.0
+            # No se ajusta pan/tilt, solo zoom
 
-            # Enviar comando de movimiento continuo con zoom
-            if hasattr(self.current_tracker, 'continuous_move'):
-                self.current_tracker.continuous_move(pan_speed, tilt_speed, zoom_speed)
-                
-                # Actualizar contadores
+            # Aplicar zoom manteniendo la orientación del preset
+            if self.detection_preset and hasattr(self.current_tracker, 'absolute_move'):
+                current_zoom = self.detection_preset.get('zoom', 0.0)
+                new_zoom = max(0.0, min(1.0, current_zoom + zoom_speed))
+                self.current_tracker.absolute_move(
+                    self.detection_preset.get('pan', 0.0),
+                    self.detection_preset.get('tilt', 0.0),
+                    new_zoom
+                )
+                self.detection_preset['zoom'] = new_zoom
+
                 if hasattr(self.current_tracker, 'successful_moves'):
                     self.current_tracker.successful_moves += 1
-                
-                # Programar detención después de un tiempo corto
+
                 if self._stop_timer.isActive():
                     self._stop_timer.stop()
-                self._stop_timer.start(100)  # 100 ms
+                self._stop_timer.start(100)
+                return True
+            elif hasattr(self.current_tracker, 'continuous_move'):
+                self.current_tracker.continuous_move(pan_speed, tilt_speed, zoom_speed)
+
+                if hasattr(self.current_tracker, 'successful_moves'):
+                    self.current_tracker.successful_moves += 1
+
+                if self._stop_timer.isActive():
+                    self._stop_timer.stop()
+                self._stop_timer.start(100)
                 return True
             
             return False
@@ -1367,9 +1367,22 @@ class EnhancedMultiObjectPTZDialog(QDialog):
 
     def _zoom_out_search(self):
         """Realizar zoom out para buscar nuevas detecciones"""
-        if self.current_tracker and hasattr(self.current_tracker, 'continuous_move'):
+        if self.current_tracker:
             try:
-                self.current_tracker.continuous_move(0.0, 0.0, -self.search_zoom_speed)
+                if self.detection_preset and hasattr(self.current_tracker, 'absolute_move'):
+                    current_zoom = self.detection_preset.get('zoom', 0.0)
+                    target_zoom = max(self.initial_zoom_level or 0.0, current_zoom - self.search_zoom_speed)
+                    self.current_tracker.absolute_move(
+                        self.detection_preset.get('pan', 0.0),
+                        self.detection_preset.get('tilt', 0.0),
+                        target_zoom
+                    )
+                    self.detection_preset['zoom'] = target_zoom
+                    if target_zoom <= (self.initial_zoom_level or 0.0):
+                        self.detection_preset = None
+                        self.initial_zoom_level = None
+                elif hasattr(self.current_tracker, 'continuous_move'):
+                    self.current_tracker.continuous_move(0.0, 0.0, -self.search_zoom_speed)
             except Exception as e:
                 self._log(f"⚠️ Error ejecutando búsqueda por zoom: {e}")
 
@@ -1383,10 +1396,13 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             ptz = last_entry.get('ptz')
 
             if ptz and hasattr(self.current_tracker, 'absolute_move'):
+                zoom_level = ptz.get('zoom')
+                if self.initial_zoom_level is not None:
+                    zoom_level = self.initial_zoom_level
                 self.current_tracker.absolute_move(
                     ptz.get('pan', 0.0),
                     ptz.get('tilt', 0.0),
-                    ptz.get('zoom')
+                    zoom_level
                 )
         except Exception as e:
             self._log(f"⚠️ Error recentrando última posición: {e}")
