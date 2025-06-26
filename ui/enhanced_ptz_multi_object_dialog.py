@@ -219,6 +219,9 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         self.detection_count = 0
         self.session_start_time = 0
         self.performance_history = []
+
+        # Margen de centrado antes de aplicar zoom
+        self.centering_margin = 0.1
         
         # Timer para actualización de UI
         self.ui_update_timer = QTimer()
@@ -1256,17 +1259,19 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             error_y = (cy - center_y) / center_y  # Normalizado [-1, 1]
             
             # Zona muerta para evitar movimientos innecesarios
-            deadzone = 0.1
-            if abs(error_x) < deadzone and abs(error_y) < deadzone:
-                return True  # Objeto centrado, no mover
-            
-            # Calcular velocidades de movimiento
-            pan_speed = error_x * 0.3  # Velocidad proporcional al error
-            tilt_speed = -error_y * 0.3  # Invertir Y para PTZ
-            
-            # Limitar velocidades
-            pan_speed = max(-0.5, min(0.5, pan_speed))
-            tilt_speed = max(-0.5, min(0.5, tilt_speed))
+            deadzone = self.centering_margin
+            centered = abs(error_x) < deadzone and abs(error_y) < deadzone
+
+            # Calcular velocidades de movimiento solo si no está centrado
+            pan_speed = 0.0
+            tilt_speed = 0.0
+            if not centered:
+                pan_speed = error_x * 0.3  # Velocidad proporcional al error
+                tilt_speed = -error_y * 0.3  # Invertir Y para PTZ
+
+                # Limitar velocidades
+                pan_speed = max(-0.5, min(0.5, pan_speed))
+                tilt_speed = max(-0.5, min(0.5, tilt_speed))
 
             # ===== Control de ZOOM BÁSICO =====
             # Calcular área relativa del objeto en el frame
@@ -1284,6 +1289,10 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 zoom_speed = base_zoom_speed
             elif obj_ratio > target_ratio:
                 zoom_speed = -base_zoom_speed
+
+            # Evitar aplicar zoom cuando el objeto no está centrado
+            if not centered:
+                zoom_speed = 0.0
 
             # Enviar comando de movimiento continuo con zoom
             if hasattr(self.current_tracker, 'continuous_move'):
