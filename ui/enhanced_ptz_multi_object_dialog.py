@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtGui import QFont, QColor, QPalette, QPixmap, QPainter, QBrush
+from collections import deque
 import time
 import json
 import os
@@ -224,6 +225,7 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         self.frames_without_detection = 0
         self.search_zoom_speed = 0.05
         self.last_known_ptz = None
+        self.position_history = deque(maxlen=20)
 
         # Margen de centrado antes de aplicar zoom
         self.centering_margin = 0.1
@@ -386,6 +388,9 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         self.goto_preset_btn = QPushButton("Ir a Preset")
         self.goto_preset_btn.clicked.connect(self._goto_preset)
         preset_layout.addWidget(self.goto_preset_btn)
+        self.recover_btn = QPushButton("Recuperar Objetivo")
+        self.recover_btn.clicked.connect(self._recenter_on_last_known)
+        preset_layout.addWidget(self.recover_btn)
         tracking_layout.addLayout(preset_layout)
         
         layout.addWidget(tracking_group)
@@ -1159,12 +1164,23 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 self.frames_without_detection += 1
                 if self.frames_without_detection >= 10:
                     self._zoom_out_search()
+                if self.frames_without_detection >= 20:
+                    self._recenter_on_last_known()
                 return False
             else:
                 if hasattr(self.current_tracker, 'get_position'):
                     pos = self.current_tracker.get_position()
                     if pos:
                         self.last_known_ptz = pos
+                # Guardar historial de posición
+                try:
+                    best_det = max(valid_detections, key=lambda d: d.get('confidence', 0))
+                    bx1, by1, bx2, by2 = best_det['bbox']
+                    cx = (bx1 + bx2) / 2
+                    cy = (by1 + by2) / 2
+                    self.position_history.append({'center': (cx, cy), 'ptz': self.last_known_ptz})
+                except Exception:
+                    pass
                 self.frames_without_detection = 0
                 if prev_frames >= 10:
                     self._stop_current_movement()
@@ -1356,6 +1372,24 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 self.current_tracker.continuous_move(0.0, 0.0, -self.search_zoom_speed)
             except Exception as e:
                 self._log(f"⚠️ Error ejecutando búsqueda por zoom: {e}")
+
+    def _recenter_on_last_known(self):
+        """Recentrar PTZ a la última posición conocida"""
+        try:
+            if not self.position_history or not self.current_tracker:
+                return
+
+            last_entry = self.position_history[-1]
+            ptz = last_entry.get('ptz')
+
+            if ptz and hasattr(self.current_tracker, 'absolute_move'):
+                self.current_tracker.absolute_move(
+                    ptz.get('pan', 0.0),
+                    ptz.get('tilt', 0.0),
+                    ptz.get('zoom')
+                )
+        except Exception as e:
+            self._log(f"⚠️ Error recentrando última posición: {e}")
 
     def _update_multi_config(self):
         """Actualizar configuración multi-objeto"""
