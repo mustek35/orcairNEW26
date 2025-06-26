@@ -433,19 +433,39 @@ class PTZPresetDialog(QDialog):
             if self.current_camera_data:
                 ip = self.current_camera_data.get('ip', 'unknown')
                 presets_file = f"presets_{ip}.json"
+
+                loaded = False
                 if os.path.exists(presets_file):
                     with open(presets_file, 'r') as f:
                         self.presets_data = json.load(f)
+                    loaded = True
                     self._log(f"✅ Presets cargados desde {presets_file}")
                 else:
                     self.presets_data = {}
-                    self._log("ℹ️ No se encontró archivo de presets, iniciando con lista vacía")
+                    self._log("ℹ️ No se encontró archivo de presets, intentando obtenerlos de la cámara")
+
+                if not loaded and self.ptz_camera and hasattr(self.ptz_camera, 'get_presets'):
+                    try:
+                        remote = self.ptz_camera.get_presets()
+                        if remote:
+                            for token, name in remote.items():
+                                self.presets_data[str(token)] = {
+                                    "name": name,
+                                    "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "camera_ip": ip,
+                                }
+                            self._log(f"✅ {len(remote)} presets obtenidos de la cámara")
+                            self._save_presets_to_file()
+                            loaded = True
+                    except Exception as fetch_err:
+                        self._log(f"⚠️ Error obteniendo presets remotos: {fetch_err}")
+
             else:
                 self.presets_data = {}
                 self._log("⚠️ Sin cámara seleccionada, no se pueden cargar presets")
-                
+
             self.refresh_presets_list()
-            
+
         except Exception as e:
             self._log(f"❌ Error cargando presets: {e}")
             self.presets_data = {}
@@ -765,7 +785,12 @@ class PTZPresetDialog(QDialog):
             self._log("❌ No hay conexión PTZ activa")
             return
 
-        self._patrol_presets = sorted(int(k) for k in self.presets_data.keys())
+        tokens = list(self.presets_data.keys())
+        if all(str(t).isdigit() for t in tokens):
+            tokens = sorted(tokens, key=lambda x: int(x))
+        else:
+            tokens = sorted(tokens)
+        self._patrol_presets = tokens
         self._current_patrol_index = 0
         self._patrol_running = True
         self._log("🚶 Iniciando patrulla automática")
