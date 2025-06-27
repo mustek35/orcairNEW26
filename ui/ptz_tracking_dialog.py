@@ -565,7 +565,7 @@ class PTZTrackingDialog(QDialog):
             return
             
         try:
-            dialog = PTZPresetDialog(self, camera_list=self.all_cameras, ptz_camera=cam)
+            dialog = PTZPresetDialog(self, self.current_camera_data, cam)
             dialog.preset_updated.connect(self._on_preset_updated)
             dialog.exec()
         except Exception as e:

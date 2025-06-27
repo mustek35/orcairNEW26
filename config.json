@@ -275,9 +275,6 @@
             "adaptive_fps": true
         }
     },
-    "preset_patrol": {
-        "interval": 30
-    },
     "adaptive_sampling": {
         "base_interval": 8,
         "min_interval": 3,
