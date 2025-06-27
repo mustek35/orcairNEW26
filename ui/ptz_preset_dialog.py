@@ -460,6 +460,30 @@ class PTZPresetDialog(QDialog):
                     except Exception as fetch_err:
                         self._log(f"⚠️ Error obteniendo presets remotos: {fetch_err}")
 
+                if not loaded:
+                    try:
+                        if os.path.exists(CONFIG_FILE_PATH):
+                            with open(CONFIG_FILE_PATH, 'r') as f:
+                                cfg = json.load(f)
+                            for cam in cfg.get("camaras", []):
+                                if cam.get("ip") == ip:
+                                    cell_map = cam.get("cell_ptz_map", {})
+                                    for cell in cell_map.values():
+                                        if cell.get("ip") == ip:
+                                            token = str(cell.get("preset"))
+                                            if token not in self.presets_data:
+                                                self.presets_data[token] = {
+                                                    "name": f"Preset {token}",
+                                                    "created": "desconocido",
+                                                    "camera_ip": ip,
+                                                }
+                                    if self.presets_data:
+                                        loaded = True
+                                        self._log(f"✅ {len(self.presets_data)} presets cargados de config.json")
+                                    break
+                    except Exception as cfg_err:
+                        self._log(f"⚠️ Error leyendo config.json: {cfg_err}")
+
             else:
                 self.presets_data = {}
                 self._log("⚠️ Sin cámara seleccionada, no se pueden cargar presets")
