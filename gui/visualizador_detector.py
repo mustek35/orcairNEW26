@@ -25,9 +25,11 @@ class VisualizadorDetector(QObject):
         self.video_player.setVideoSink(self.video_sink)
 
         self.video_sink.videoFrameChanged.connect(self.on_frame)
-        self.video_player.errorOccurred.connect(
-            lambda e: logger.error(
-                "MediaPlayer error (%s): %s", self.objectName(), self.video_player.errorString()
+        self.video_player.errorOccurred.connect(self._handle_player_error)
+        # Opcional: log de cambios de estado del player para diagnóstico
+        self.video_player.mediaStatusChanged.connect(
+            lambda status: logger.debug(
+                "%s: Media status changed → %s", self.objectName(), status.name
             )
         )
 
@@ -77,6 +79,12 @@ class VisualizadorDetector(QObject):
             detector.start()
             self.detectors.append(detector)
         logger.debug("%s: %d DetectorWorker(s) started", self.objectName(), len(self.detectors))
+
+    def _handle_player_error(self, error):
+        """Handle errors from QMediaPlayer"""
+        message = f"MediaPlayer error ({self.objectName()}): {self.video_player.errorString()}"
+        logger.error(message)
+        self.log_signal.emit(f"❌ {message}")
 
     def update_fps_config(self, visual_fps=25, detection_fps=8):
         """Actualizar configuración de FPS en tiempo real"""
