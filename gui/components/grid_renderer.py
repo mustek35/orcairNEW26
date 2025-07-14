@@ -126,6 +126,11 @@ class GridRenderer(QObject):
         # Dibujar video de fondo si está disponible
         if video_pixmap and not video_pixmap.isNull():
             self._paint_video_background(painter, widget_rect, video_pixmap)
+        else:
+            # Dibujar fondo negro si no hay video
+            painter.fillRect(widget_rect, QColor("black"))
+            painter.setPen(QColor("white"))
+            painter.drawText(widget_rect, Qt.AlignmentFlag.AlignCenter, "Sin señal")
         
         # Calcular dimensiones de celdas
         cell_w = widget_rect.width() / self.cell_manager.columnas
